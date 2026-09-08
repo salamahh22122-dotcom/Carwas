@@ -12,25 +12,26 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
 
+    env:
+      ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+
     steps:
       # ==========================================
-      # 1. Checkout repository
+      # 1. Checkout
       # ==========================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # ==========================================
-      # 2. Setup Node.js 20
+      # 2. Node.js 20
       # ==========================================
       - name: Setup Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: "**/package-lock.json"
 
       # ==========================================
-      # 3. Setup Java JDK 21
+      # 3. Java JDK 21
       # ==========================================
       - name: Setup Java JDK 21
         uses: actions/setup-java@v4
@@ -39,23 +40,44 @@ jobs:
           java-version: "21"
 
       # ==========================================
-      # 4. Setup Android SDK
+      # 4. Android SDK
       # ==========================================
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       # ==========================================
-      # 5. Install Android SDK packages
+      # 5. Android SDK packages
       # ==========================================
       - name: Install Android SDK packages
         run: |
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
           sdkmanager "build-tools;35.0.0"
+
           yes | sdkmanager --licenses || true
 
       # ==========================================
-      # 6. Find ZIP project
+      # 6. Verify environment
+      # ==========================================
+      - name: Verify environment
+        run: |
+          echo "=============================="
+          echo "NODE"
+          echo "=============================="
+          node --version
+
+          echo "=============================="
+          echo "NPM"
+          echo "=============================="
+          npm --version
+
+          echo "=============================="
+          echo "JAVA"
+          echo "=============================="
+          java -version
+
+      # ==========================================
+      # 7. Find ZIP
       # ==========================================
       - name: Find project ZIP
         shell: bash
@@ -63,7 +85,7 @@ jobs:
           ZIP_FILE=$(find . \
             -maxdepth 3 \
             -type f \
-            \( -iname "*.zip" \) \
+            -iname "*.zip" \
             | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
@@ -77,7 +99,7 @@ jobs:
           echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
 
       # ==========================================
-      # 7. Extract ZIP
+      # 8. Extract ZIP
       # ==========================================
       - name: Extract project ZIP
         shell: bash
@@ -87,13 +109,13 @@ jobs:
 
           unzip -q "$ZIP_FILE" -d project
 
-          echo "Struktur hasil extract:"
+          echo "Isi proyek:"
           find project -maxdepth 3 -type f | head -150
 
       # ==========================================
-      # 8. Find package.json
+      # 9. Find package.json
       # ==========================================
-      - name: Find Node project
+      - name: Locate package.json
         shell: bash
         run: |
           PACKAGE_JSON=$(find project \
@@ -108,7 +130,7 @@ jobs:
 
           PROJECT_DIR=$(dirname "$PACKAGE_JSON")
 
-          echo "package.json ditemukan:"
+          echo "package.json:"
           echo "$PACKAGE_JSON"
 
           echo "Project directory:"
@@ -117,26 +139,14 @@ jobs:
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
       # ==========================================
-      # 9. Show Node / Java versions
-      # ==========================================
-      - name: Verify build environment
-        run: |
-          echo "Node:"
-          node --version
-
-          echo "NPM:"
-          npm --version
-
-          echo "Java:"
-          java -version
-
-      # ==========================================
       # 10. Install dependencies
       # ==========================================
       - name: Install npm dependencies
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          npm install --no-audit --no-fund
+          npm install \
+            --no-audit \
+            --no-fund
 
       # ==========================================
       # 11. Force Capacitor 7
@@ -153,18 +163,19 @@ jobs:
             --no-fund
 
       # ==========================================
-      # 12. Verify Capacitor version
+      # 12. Verify Capacitor
       # ==========================================
-      - name: Verify Capacitor
+      - name: Verify Capacitor version
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          echo "Capacitor version:"
+          echo "Capacitor:"
           npx cap --version
 
+          echo "Node:"
           node --version
 
       # ==========================================
-      # 13. Build React/Vite
+      # 13. Build Vite
       # ==========================================
       - name: Build web application
         working-directory: ${{ env.PROJECT_DIR }}
@@ -174,15 +185,15 @@ jobs:
       # ==========================================
       # 14. Create Android project
       # ==========================================
-      - name: Create Android platform
+      - name: Add Android platform
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           npx cap add android
 
       # ==========================================
-      # 15. Sync web build to Android
+      # 15. Sync Capacitor
       # ==========================================
-      - name: Sync Capacitor
+      - name: Sync Android project
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           npx cap sync android
@@ -193,16 +204,22 @@ jobs:
       - name: Verify Android project
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          test -d android
-          test -f android/gradlew
-          test -f android/settings.gradle
+          if [ ! -d "android" ]; then
+            echo "ERROR: Folder android tidak ditemukan."
+            exit 1
+          fi
 
-          echo "Android project berhasil dibuat."
+          if [ ! -f "android/gradlew" ]; then
+            echo "ERROR: Gradle wrapper tidak ditemukan."
+            exit 1
+          fi
+
+          echo "Android project OK."
 
       # ==========================================
-      # 17. Build Debug APK
+      # 17. Build APK
       # ==========================================
-      - name: Build APK
+      - name: Build Debug APK
         working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           chmod +x gradlew
@@ -213,33 +230,52 @@ jobs:
             --stacktrace
 
       # ==========================================
-      # 18. Prepare APK
+      # 18. Find APK
       # ==========================================
-      - name: Prepare APK artifact
+      - name: Find generated APK
         working-directory: ${{ env.PROJECT_DIR }}
         shell: bash
         run: |
-          mkdir -p release
+          echo "Mencari APK..."
 
-          APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+          find android \
+            -type f \
+            -name "*.apk" \
+            -print
 
-          if [ ! -f "$APK_PATH" ]; then
-            echo "ERROR: APK tidak ditemukan."
-            echo "Mencari semua APK:"
-            find android -type f -name "*.apk"
+          APK_PATH=$(find android \
+            -type f \
+            -name "app-debug.apk" \
+            | head -n 1)
+
+          if [ -z "$APK_PATH" ]; then
+            echo "ERROR: APK tidak berhasil dibuat."
             exit 1
           fi
 
+          echo "APK ditemukan:"
+          echo "$APK_PATH"
+
+          echo "APK_PATH=$APK_PATH" >> "$GITHUB_ENV"
+
+      # ==========================================
+      # 19. Prepare APK
+      # ==========================================
+      - name: Prepare APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          mkdir -p release
+
           cp "$APK_PATH" \
-            "release/car-wash-management-debug.apk"
+            release/car-wash-management-debug.apk
 
-          echo "APK berhasil dibuat:"
-          ls -lh release/car-wash-management-debug.apk
+          echo "APK siap:"
+          ls -lh release/
 
       # ==========================================
-      # 19. Upload APK
+      # 20. Upload APK Artifact
       # ==========================================
-      - name: Upload APK artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: car-wash-management-apk
