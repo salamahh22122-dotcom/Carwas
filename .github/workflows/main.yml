@@ -30,37 +30,87 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK packages
+      - name: Install Android SDK
         run: |
           sdkmanager "platform-tools"
-          sdkmanager "platforms;android-35"
-          sdkmanager "build-tools;35.0.0"
+          sdkmanager "platforms;android-36"
+          sdkmanager "build-tools;36.0.0"
+          yes | sdkmanager --licenses || true
 
-      - name: Install dependencies
-        run: npm install
+      - name: Find ZIP
+        run: |
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
 
-      - name: Build React/Vite application
-        run: npm run build
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: File ZIP tidak ditemukan."
+            exit 1
+          fi
 
-      - name: Sync Capacitor Android
-        run: npx cap sync android
+          echo "ZIP ditemukan: $ZIP_FILE"
+          echo "ZIP_FILE=$ZIP_FILE" >> "$GITHUB_ENV"
+
+      - name: Extract ZIP
+        run: |
+          rm -rf project
+          mkdir project
+
+          unzip -q "$ZIP_FILE" -d project
+
+          echo "Isi hasil extract:"
+          find project -maxdepth 2 -type f | head -100
+
+      - name: Locate package.json
+        run: |
+          PACKAGE_DIR=$(dirname "$(find project -name package.json -type f | head -n 1)")
+
+          if [ -z "$PACKAGE_DIR" ] || [ "$PACKAGE_DIR" = "." ]; then
+            echo "ERROR: package.json tidak ditemukan."
+            exit 1
+          fi
+
+          echo "Project directory: $PACKAGE_DIR"
+          echo "PROJECT_DIR=$PACKAGE_DIR" >> "$GITHUB_ENV"
+
+      - name: Install Node dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          npm install --no-audit --no-fund
+
+      - name: Build React/Vite
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          npm run build
+
+      - name: Create Android project
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          npx cap add android
+
+      - name: Sync Capacitor
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          npx cap sync android
 
       - name: Build APK
-        working-directory: android
+        working-directory: ${{ env.PROJECT_DIR }}/android
         run: |
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Copy APK
+      - name: Prepare APK
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           mkdir -p release
-          cp android/app/build/outputs/apk/debug/app-debug.apk \
-             release/car-wash-management-debug.apk
 
-      - name: Upload APK Artifact
+          cp android/app/build/outputs/apk/debug/app-debug.apk \
+            release/car-wash-management-debug.apk
+
+          ls -lh release/
+
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: car-wash-management-apk
-          path: release/car-wash-management-debug.apk
+          path: ${{ env.PROJECT_DIR }}/release/car-wash-management-debug.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
